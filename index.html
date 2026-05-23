@@ -1,26 +1,113 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Choose a File</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      gap: 20px;
-    }
-    button {
-      padding: 12px 20px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Receiver</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+   body { font-family: Arial; background: #f5f5f5; padding: 30px; }
+   h1 { font-size: 32px; }
+   .status { font-size: 20px; margin-bottom: 20px; }
+   .log-container {
+       background: white; padding: 20px; border-radius: 10px;
+       height: 400px; overflow-y: auto; font-size: 18px;
+       box-shadow: 0 0 10px rgba(0,0,0,0.1);
+   }
+   .log-entry { padding: 10px 0; border-bottom: 1px solid #eee; }
+   .timestamp { color: #888; font-size: 14px; }
+   .message { font-size: 20px; margin-top: 5px; }
+</style>
 </head>
 <body>
-  <button onclick="window.location.href='sender.html'">Sender</button>
-  <button onclick="window.location.href='receiver.html'">Receiver</button>
+
+<h1>Receiver</h1>
+
+<div class="status" id="mumStatus">Checking Mum’s status…</div>
+<div class="status" id="myStatus">Setting your status…</div>
+
+<div class="log-container" id="log"></div>
+
+<script type="module">
+   import { initializeApp } from "https://apac01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.gstatic.com%2Ffirebasejs%2F10.7.1%2Ffirebase-app.js&data=05%7C02%7C%7C596bf29f9b4f457c832108deb886ede0%7C84df9e7fe9f640afb435aaaaaaaaaaaa%7C1%7C0%7C639151086823285966%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=ckdoZNgcY0ImGkDCWXxPDB567DSA%2BSRTpSvuSGIaRqE%3D&reserved=0";
+   import { getDatabase, ref, set, onValue, onDisconnect } from "https://apac01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.gstatic.com%2Ffirebasejs%2F10.7.1%2Ffirebase-database.js&data=05%7C02%7C%7C596bf29f9b4f457c832108deb886ede0%7C84df9e7fe9f640afb435aaaaaaaaaaaa%7C1%7C0%7C639151086823309188%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=IJZqmY1LZKYALA7N2DYj9ul%2FbHDgqrBQi9s39%2BSli0Q%3D&reserved=0";
+
+   const firebaseConfig = {
+     apiKey: "AIzaSyDEUjHWVtBxzcqgB4TzPCq0meLC_rz3mRU",
+     authDomain: "turn-off-now.firebaseapp.com",
+     databaseURL: "https://apac01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fturn-off-now-default-rtdb.firebaseio.com%2F&data=05%7C02%7C%7C596bf29f9b4f457c832108deb886ede0%7C84df9e7fe9f640afb435aaaaaaaaaaaa%7C1%7C0%7C639151086823326867%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=%2FH5JFwjxY1YziJzlOnOF%2BGRVBepEri8javQrGCxAmyA%3D&reserved=0",
+     projectId: "turn-off-now",
+     storageBucket: "turn-off-now.firebasestorage.app",
+     messagingSenderId: "198256441947",
+     appId: "1:198256441947:web:08f994cc83ec313589dd7e",
+     measurementId: "G-YR1Y64KWJZ"
+   };
+
+   const app = initializeApp(firebaseConfig);
+   const db = getDatabase(app);
+
+   // Ask for username
+   let username = prompt("Enter your device name:");
+   if (!username) username = "Device";
+
+   const myStatusRef = ref(db, "status/" + username);
+   const mumStatusRef = ref(db, "status/Mum");
+
+   // Mark this receiver online
+   set(myStatusRef, { online: true, timestamp: Date.now() });
+   onDisconnect(myStatusRef).set({ online: false, timestamp: Date.now() });
+
+   document.getElementById("myStatus").textContent = `${username} is ONLINE`;
+
+   // Listen for Mum’s status
+   onValue(mumStatusRef, (snap) => {
+       const data = snap.val();
+       const box = document.getElementById("mumStatus");
+       if (data && data.online) {
+           box.textContent = "Mum is ONLINE";
+           box.style.color = "green";
+       } else {
+           box.textContent = "Mum is OFFLINE";
+           box.style.color = "red";
+       }
+   });
+
+   // Listen for notifications
+   const notifRef = ref(db, "notifications");
+   const logBox = document.getElementById("log");
+
+   function addLog(message, timestamp) {
+       const entry = document.createElement("div");
+       entry.className = "log-entry";
+       entry.innerHTML = `
+           <div class="timestamp">${new Date(timestamp).toLocaleTimeString()}</div>
+           <div class="message">${message}</div>
+       `;
+       logBox.appendChild(entry);
+       logBox.scrollTop = logBox.scrollHeight;
+   }
+
+   onValue(notifRef, (snapshot) => {
+       const data = snapshot.val();
+       if (!data) return;
+
+       logBox.innerHTML = "";
+
+       Object.values(data).forEach((msg) => {
+           if (msg.to === "ALL" || msg.to === username) {
+               addLog(`${msg.from}: ${msg.message}`, msg.timestamp);
+
+               if (Notification.permission === "granted") {
+                   new Notification(`${msg.from}: ${msg.message}`);
+               }
+           }
+       });
+   });
+
+   if (Notification.permission !== "granted") {
+       Notification.requestPermission();
+   }
+</script>
+
 </body>
 </html>
