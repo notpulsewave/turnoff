@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Mobile Controller</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f8ff;
+      padding: 20px;
+      color: #222;
+      text-align: center;
+    }
+
+    h1 {
+      color: #0a4cff;
+      margin-bottom: 20px;
+    }
+
+    input {
+      padding: 10px;
+      border-radius: 10px;
+      border: 2px solid #0a4cff;
+      width: 200px;
+      margin: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      background: #0a4cff;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 16px;
+      margin: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: #0039d6;
+      transform: scale(1.05);
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin: 20px auto;
+      max-width: 400px;
+    }
+
+    .label {
+      font-weight: bold;
+      color: #0a4cff;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Mobile Controller</h1>
+
+<div class="card">
+  <div class="label">Computer ID</div>
+  <input id="computerId" value="pc-1">
+  <button id="connectBtn">Connect</button>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <p>Online: <span id="onlineStatus">Unknown</span></p>
+  <p>Last Ping: <span id="lastPing">-</span></p>
+</div>
+
+<div class="card">
+  <h2>Immediate Turn Off</h2>
+  <button id="turnOffNowBtn">Send Turn Off (every 5s)</button>
+  <button id="stopTurnOffBtn">Stop Turn Off</button>
+</div>
+
+<div class="card">
+  <h2>Schedule Turn Off</h2>
+  <input id="scheduleMinutes" type="number" min="1" value="60">
+  <button id="setScheduleBtn">Set Schedule</button>
+  <button id="clearScheduleBtn">Clear Schedule</button>
+
+  <h3>Schedule Info</h3>
+  <p>End Time: <span id="scheduleEndTime">-</span></p>
+  <p>Time Left: <span id="timeLeft">-</span></p>
+  <p>Milestone: <span id="milestoneMsg">-</span></p>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import {
+  getDatabase, ref, onValue, set, update, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDEUjHWVtBxzcqgB4TzPCq0meLC_rz3mRU",
+  authDomain: "turn-off-now.firebaseapp.com",
+  databaseURL: "https://turn-off-now-default-rtdb.firebaseio.com",
+  projectId: "turn-off-now",
+  storageBucket: "turn-off-now.firebasestorage.app",
+  messagingSenderId: "198256441947",
+  appId: "1:198256441947:web:08f994cc83ec313589dd7e",
+  measurementId: "G-YR1Y64KWJZ"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const computerIdInput = document.getElementById("computerId");
+const connectBtn = document.getElementById("connectBtn");
+const onlineStatusEl = document.getElementById("onlineStatus");
+const lastPingEl = document.getElementById("lastPing");
+
+const turnOffNowBtn = document.getElementById("turnOffNowBtn");
+const stopTurnOffBtn = document.getElementById("stopTurnOffBtn");
+
+const scheduleMinutesInput = document.getElementById("scheduleMinutes");
+const setScheduleBtn = document.getElementById("setScheduleBtn");
+const clearScheduleBtn = document.getElementById("clearScheduleBtn");
+
+const scheduleEndTimeEl = document.getElementById("scheduleEndTime");
+const timeLeftEl = document.getElementById("timeLeft");
+const milestoneMsgEl = document.getElementById("milestoneMsg");
+
+let commandRef = null;
+let scheduleRef = null;
+let statusRef = null;
+let countdownInterval = null;
+
+function connectToComputer() {
+  const id = computerIdInput.value.trim();
+  if (!id) return alert("Enter a computer ID");
+
+  statusRef = ref(db, `computers/${id}`);
+  commandRef = ref(db, `computers/${id}/command`);
+  scheduleRef = ref(db, `computers/${id}/schedule`);
+
+  onValue(statusRef, snap => {
+    const data = snap.val() || {};
+    onlineStatusEl.textContent = data.online ? "Yes" : "No";
+    lastPingEl.textContent = data.lastPing ? new Date(data.lastPing).toLocaleString() : "-";
+  });
+
+  onValue(scheduleRef, snap => {
+    const schedule = snap.val();
+    if (!schedule || !schedule.active) {
+      scheduleEndTimeEl.textContent = "-";
+      timeLeftEl.textContent = "-";
+      milestoneMsgEl.textContent = "-";
+      clearInterval(countdownInterval);
+      return;
+    }
+
+    const end = schedule.endTime;
+    scheduleEndTimeEl.textContent = new Date(end).toLocaleString();
+
+    clearInterval(countdownInterval);
+    countdownInterval = setInterval(() => updateCountdown(end), 1000);
+  });
+
+  alert("Connected");
+}
+
+function updateCountdown(endTime) {
+  const now = Date.now();
+  const diff = endTime - now;
+
+  if (diff <= 0) {
+    timeLeftEl.textContent = "0m (time is up)";
+    milestoneMsgEl.textContent = "Time is up!";
+    return;
+  }
+
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff / 1000) % 60);
+
+  timeLeftEl.textContent = `${mins}m ${secs}s`;
+
+  const milestones = [120, 60, 30, 15, 10, 5, 3, 1];
+  let msg = "";
+  for (const m of milestones) {
+    if (mins <= m) msg = `Less than ${m} minutes left`;
+  }
+  milestoneMsgEl.textContent = msg;
+}
+
+connectBtn.onclick = connectToComputer;
+
+turnOffNowBtn.onclick = () => {
+  if (!commandRef) return alert("Connect first");
+  set(commandRef, {
+    type: "shutdown",
+    active: true,
+    intervalMs: 5000,
+    createdAt: serverTimestamp()
+  });
+};
+
+stopTurnOffBtn.onclick = () => {
+  if (!commandRef) return alert("Connect first");
+  update(commandRef, { active: false });
+};
+
+setScheduleBtn.onclick = () => {
+  if (!scheduleRef) return alert("Connect first");
+  const mins = parseInt(scheduleMinutesInput.value);
+  const end = Date.now() + mins * 60000;
+  set(scheduleRef, { active: true, endTime: end });
+};
+
+clearScheduleBtn.onclick = () => {
+  if (!scheduleRef) return alert("Connect first");
+  set(scheduleRef, { active: false });
+};
+</script>
+</body>
+</html>
