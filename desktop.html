@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Desktop Receiver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef4ff;
+      padding: 20px;
+      text-align: center;
+    }
+
+    h1 {
+      color: #0a4cff;
+    }
+
+    input {
+      padding: 10px;
+      border-radius: 10px;
+      border: 2px solid #0a4cff;
+      width: 200px;
+      margin: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      background: #0a4cff;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 16px;
+      margin: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: #0039d6;
+      transform: scale(1.05);
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin: 20px auto;
+      max-width: 450px;
+    }
+
+    #statusIndicator {
+      padding: 10px;
+      border-radius: 10px;
+      font-weight: bold;
+      margin-top: 10px;
+      color: white;
+    }
+
+    #logBox {
+      background: #111;
+      color: #0f0;
+      padding: 10px;
+      border-radius: 10px;
+      height: 150px;
+      overflow-y: auto;
+      font-family: monospace;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Desktop Receiver</h1>
+
+<div class="card">
+  <div class="label">Computer ID</div>
+  <input id="computerId" value="pc-1">
+  <button id="startBtn">Start</button>
+
+  <div id="statusIndicator" style="background:red;">Not Connected</div>
+</div>
+
+<div class="card">
+  <button id="notifBtn">Enable Notifications</button>
+</div>
+
+<div class="card">
+  <h2>Schedule</h2>
+  <p>End Time: <span id="scheduleEndTime">-</span></p>
+  <p>Time Left: <span id="timeLeft">-</span></p>
+  <p>Milestone: <span id="milestoneMsg">-</span></p>
+</div>
+
+<div class="card">
+  <h2>Event Log</h2>
+  <div id="logBox"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import {
+  getDatabase, ref, onValue, set, update
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDEUjHWVtBxzcqgB4TzPCq0meLC_rz3mRU",
+  authDomain: "turn-off-now.firebaseapp.com",
+  databaseURL: "https://turn-off-now-default-rtdb.firebaseio.com",
+  projectId: "turn-off-now",
+  storageBucket: "turn-off-now.firebasestorage.app",
+  messagingSenderId: "198256441947",
+  appId: "1:198256441947:web:08f994cc83ec313589dd7e",
+  measurementId: "G-YR1Y64KWJZ"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const computerIdInput = document.getElementById("computerId");
+const startBtn = document.getElementById("startBtn");
+const notifBtn = document.getElementById("notifBtn");
+const statusIndicator = document.getElementById("statusIndicator");
+const logBox = document.getElementById("logBox");
+
+const scheduleEndTimeEl = document.getElementById("scheduleEndTime");
+const timeLeftEl = document.getElementById("timeLeft");
+const milestoneMsgEl = document.getElementById("milestoneMsg");
+
+let commandRef = null;
+let scheduleRef = null;
+let computerRef = null;
+let shutdownInterval = null;
+let countdownInterval = null;
+let heartbeat = null;
+let lastMilestone = null;
+
+function log(msg) {
+  logBox.innerHTML += msg + "<br>";
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+notifBtn.onclick = async () => {
+  const permission = await Notification.requestPermission();
+  if (permission === "granted") {
+    notifBtn.textContent = "Notifications Enabled";
+    notifBtn.style.background = "#00b32d";
+    log("Notifications enabled");
+  } else {
+    log("Notifications denied");
+  }
+};
+
+function notify(msg) {
+  if (Notification.permission === "granted") {
+    new Notification(msg);
+  }
+  log("NOTIFY: " + msg);
+}
+
+function start() {
+  const id = computerIdInput.value.trim();
+  if (!id) return alert("Enter ID");
+
+  computerRef = ref(db, `computers/${id}`);
+  commandRef = ref(db, `computers/${id}/command`);
+  scheduleRef = ref(db, `computers/${id}/schedule`);
+
+  set(computerRef, { online: true, lastPing: Date.now() });
+
+  heartbeat = setInterval(() => {
+    update(computerRef, { online: true, lastPing: Date.now() });
+  }, 10000);
+
+  statusIndicator.style.background = "green";
+  statusIndicator.textContent = "Connected";
+  log("Connected to Firebase");
+
+  // FIXED: Listener now always fires
+  onValue(commandRef, snap => {
+    const cmd = snap.val();
+    log("Command update: " + JSON.stringify(cmd));
+
+    if (!cmd || !cmd.active) {
+      clearInterval(shutdownInterval);
+      log("Shutdown command stopped");
+      return;
+    }
+
+    clearInterval(shutdownInterval);
+    shutdownInterval = setInterval(() => {
+      notify("TURN OFF NOW!");
+    }, cmd.intervalMs || 5000);
+
+    notify("Shutdown command received");
+  });
+
+  onValue(scheduleRef, snap => {
+    const schedule = snap.val();
+    log("Schedule update: " + JSON.stringify(schedule));
+
+    if (!schedule || !schedule.active) {
+      scheduleEndTimeEl.textContent = "-";
+      timeLeftEl.textContent = "-";
+      milestoneMsgEl.textContent = "-";
+      clearInterval(countdownInterval);
+      return;
+    }
+
+    const end = schedule.endTime;
+    scheduleEndTimeEl.textContent = new Date(end).toLocaleString();
+
+    clearInterval(countdownInterval);
+    countdownInterval = setInterval(() => updateCountdown(end), 1000);
+  });
+}
+
+function updateCountdown(endTime) {
+  const now = Date.now();
+  const diff = endTime - now;
+
+  if (diff <= 0) {
+    timeLeftEl.textContent = "0m (time is up)";
+    milestoneMsgEl.textContent = "Time is up!";
+    notify("Scheduled shutdown time reached");
+    return;
+  }
+
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff / 1000) % 60);
+
+  timeLeftEl.textContent = `${mins}m ${secs}s`;
+
+  const milestones = [120, 60, 30, 15, 10, 5, 3, 1];
+
+  for (const m of milestones) {
+    if (mins <= m && lastMilestone !== m) {
+      lastMilestone = m;
+      milestoneMsgEl.textContent = `Less than ${m} minutes left`;
+      notify(`Less than ${m} minutes left`);
+    }
+  }
+}
+
+startBtn.onclick = start;
+</script>
+</body>
+</html>
